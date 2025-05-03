@@ -6,6 +6,7 @@ use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use HumamK98\LaravelFilters\Generators\FilterGenerator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use ReflectionClass;
 
 class DynamicFilterResolver
@@ -39,10 +40,13 @@ class DynamicFilterResolver
         // Get model class if an instance was provided
         $modelClass = $model instanceof Model ? get_class($model) : $model;
         
+        \Log::debug('Resolving filter for model', ['model' => $modelClass]);
+        
         // Try to resolve existing filter class first
         $filterClass = $this->guessFilterClass($modelClass);
         
         if (class_exists($filterClass)) {
+            \Log::debug('Found existing filter class', ['filter' => $filterClass]);
             return $this->resolveFilterInstance($filterClass, $parameters);
         }
         
@@ -61,14 +65,26 @@ class DynamicFilterResolver
     protected function guessFilterClass(string $modelClass): string
     {
         $modelName = class_basename($modelClass);
+        $modelNamespace = $this->getModelNamespace($modelClass);
         
         $possibleNamespaces = [
+            // Standard Laravel app structure
             'App\\Filters',
             'App\\Models\\Filters',
-            $this->getModelNamespace($modelClass) . '\\Filters',
+            
+            // Add model namespace based paths
+            $modelNamespace . '\\Filters',
+            
+            // For modular structure (Modules/*/Models)
+            $this->getModularFilterNamespace($modelClass),
         ];
         
+        // Add the model's own namespace
+        $possibleNamespaces[] = $modelNamespace;
+        
         foreach ($possibleNamespaces as $namespace) {
+            if (empty($namespace)) continue;
+            
             $filterClass = $namespace . '\\' . $modelName . 'Filter';
             if (class_exists($filterClass)) {
                 return $filterClass;
@@ -80,6 +96,29 @@ class DynamicFilterResolver
     }
     
     /**
+     * Determine a filter namespace for modular structures.
+     * 
+     * @param string $modelClass
+     * @return string|null
+     */
+    protected function getModularFilterNamespace(string $modelClass): ?string
+    {
+        // For models in Modules/*/Models structure
+        if (Str::contains($modelClass, '\\Modules\\')) {
+            $parts = explode('\\', $modelClass);
+            
+            // Find the "Modules" part in the namespace
+            $moduleIndex = array_search('Modules', $parts);
+            if ($moduleIndex !== false && isset($parts[$moduleIndex + 1])) {
+                $moduleName = $parts[$moduleIndex + 1];
+                return implode('\\', array_slice($parts, 0, $moduleIndex + 1)) . '\\' . $moduleName . '\\Filters';
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
      * Get the namespace of the model.
      *
      * @param string $modelClass
@@ -87,8 +126,13 @@ class DynamicFilterResolver
      */
     protected function getModelNamespace(string $modelClass): string
     {
-        $reflection = new ReflectionClass($modelClass);
-        return $reflection->getNamespaceName();
+        try {
+            $reflection = new ReflectionClass($modelClass);
+            return $reflection->getNamespaceName();
+        } catch (\ReflectionException $e) {
+            \Log::warning('Failed to get model namespace', ['model' => $modelClass, 'error' => $e->getMessage()]);
+            return '';
+        }
     }
     
     /**
@@ -124,31 +168,13 @@ class DynamicFilterResolver
             }
         }
 
-        // Generate the full filter class name
-        $modelName = class_basename($modelClass);
-        $filterClass = 'HumamK98\\LaravelFilters\\DynamicFilters\\' . $modelName . 'Filter';
+        \Log::debug('Generating dynamic filter for model', ['model' => $modelClass]);
         
         // Create filter class content
-        $filterableColumns = [];
-        if (method_exists($modelClass, 'getFilterableColumns')) {
-            $filterableColumns = $modelClass::getFilterableColumns();
-        } else {
-            // Try to get fillable from model
-            $model = new $modelClass;
-            $filterableColumns = $model->getFillable();
-        }
+        $filterableColumns = $this->getFilterableColumnsFromModel($modelClass);
         
         // Process the request parameters for proper filtering
         $request = $parameters['request'] ?? app(\Illuminate\Http\Request::class);
-        $likeFilters = [];
-        
-        // Check for _like suffix parameters and add them to the request parameters
-        foreach ($filterableColumns as $column) {
-            $likeParam = $column . '_like';
-            if ($request->has($likeParam)) {
-                $likeFilters[$likeParam] = $request->input($likeParam);
-            }
-        }
         
         // Create an instance of ModelFilter and configure it for the target model
         $baseFilter = new ModelFilter($request);
@@ -158,5 +184,44 @@ class DynamicFilterResolver
         Cache::put($cacheKey, get_class($baseFilter), now()->addHour());
         
         return $baseFilter;
+    }
+    
+    /**
+     * Get filterable columns from model.
+     * 
+     * @param string $modelClass
+     * @return array
+     */
+    protected function getFilterableColumnsFromModel(string $modelClass): array
+    {
+        // First try using the Filterable trait's method
+        if (method_exists($modelClass, 'getFilterableColumns')) {
+            \Log::debug('Getting filterable columns from model method', ['model' => $modelClass]);
+            $columns = $modelClass::getFilterableColumns();
+            if (!empty($columns)) {
+                return $columns;
+            }
+        }
+        
+        // Try to get fillable from model
+        try {
+            \Log::debug('Attempting to get fillable columns', ['model' => $modelClass]);
+            $model = new $modelClass;
+            if (method_exists($model, 'getFillable')) {
+                $fillable = $model->getFillable();
+                if (!empty($fillable)) {
+                    return $fillable;
+                }
+            }
+        } catch (\Exception $e) {
+            \Log::warning('Failed to instantiate model', [
+                'model' => $modelClass, 
+                'error' => $e->getMessage()
+            ]);
+        }
+        
+        // Fallback to empty array
+        \Log::warning('No filterable columns found for model', ['model' => $modelClass]);
+        return [];
     }
 }

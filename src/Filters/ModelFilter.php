@@ -120,6 +120,15 @@ class ModelFilter extends Filter
             return $this->builder->where($snakeMethod, $value);
         }
         
+        // If the column is not recognized but there's a filter in the request,
+        // log this to help with debugging
+        \Log::debug('Filter not found or not allowed', [
+            'method' => $method,
+            'column' => $snakeMethod,
+            'filterable_columns' => $this->getFilterableColumnsDebug(),
+            'model_class' => $this->modelClass
+        ]);
+        
         return $this->builder;
     }
     
@@ -135,6 +144,32 @@ class ModelFilter extends Filter
             return in_array($column, $this->modelClass::getFilterableColumns());
         }
         return false;
+    }
+    
+    /**
+     * Get filterable columns for debugging purposes.
+     * 
+     * @return array
+     */
+    protected function getFilterableColumnsDebug(): array
+    {
+        if (!empty($this->modelClass)) {
+            if (method_exists($this->modelClass, 'getFilterableColumns')) {
+                return $this->modelClass::getFilterableColumns();
+            }
+            
+            // Try to instantiate the model to get fillable
+            try {
+                $model = new $this->modelClass;
+                if (method_exists($model, 'getFillable')) {
+                    return $model->getFillable();
+                }
+            } catch (\Exception $e) {
+                return ['Error instantiating model: ' . $e->getMessage()];
+            }
+        }
+        
+        return [];
     }
     
     /**
