@@ -138,8 +138,20 @@ class DynamicFilterResolver
             $filterableColumns = $model->getFillable();
         }
         
+        // Process the request parameters for proper filtering
+        $request = $parameters['request'] ?? app(\Illuminate\Http\Request::class);
+        $likeFilters = [];
+        
+        // Check for _like suffix parameters and add them to the request parameters
+        foreach ($filterableColumns as $column) {
+            $likeParam = $column . '_like';
+            if ($request->has($likeParam)) {
+                $likeFilters[$likeParam] = $request->input($likeParam);
+            }
+        }
+        
         // Create an instance of ModelFilter and configure it for the target model
-        $baseFilter = new ModelFilter(...$parameters);
+        $baseFilter = new ModelFilter($request);
         $baseFilter->forModel($modelClass);
         
         // Store the filter class in cache for next time

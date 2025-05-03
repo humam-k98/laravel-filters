@@ -79,67 +79,62 @@ class ModelFilter extends Filter
      */
     public function __call($method, $args)
     {
-        // Check if direct column match
-        if (!empty($this->modelClass) && method_exists($this->modelClass, 'getFilterableColumns') && 
-            in_array($method, $this->modelClass::getFilterableColumns())) {
-            return $this->builder->where($method, $args[0]);
+        // If no arguments provided, return builder
+        if (empty($args)) {
+            return $this->builder;
+        }
+        
+        $value = $args[0];
+        if (is_null($value) || $value === '') {
+            return $this->builder;
+        }
+        
+        $snakeMethod = Str::snake($method);
+        
+        // Check if it's a like filter
+        if (Str::endsWith($snakeMethod, '_like')) {
+            $column = Str::before($snakeMethod, '_like');
+            if ($this->isFilterableColumn($column)) {
+                return $this->builder->where($column, 'like', "%{$value}%");
+            }
         }
         
         // Check if it's a min filter
-        if (Str::endsWith($method, 'Min')) {
-            $column = Str::snake(Str::before($method, 'Min'));
-            return $this->handleMinFilter($column, $args[0]);
+        if (Str::endsWith($snakeMethod, '_min')) {
+            $column = Str::before($snakeMethod, '_min');
+            if ($this->isFilterableColumn($column)) {
+                return $this->builder->where($column, '>=', $value);
+            }
         }
         
         // Check if it's a max filter
-        if (Str::endsWith($method, 'Max')) {
-            $column = Str::snake(Str::before($method, 'Max'));
-            return $this->handleMaxFilter($column, $args[0]);
+        if (Str::endsWith($snakeMethod, '_max')) {
+            $column = Str::before($snakeMethod, '_max');
+            if ($this->isFilterableColumn($column)) {
+                return $this->builder->where($column, '<=', $value);
+            }
         }
         
-        // Check if it's a like filter
-        if (Str::endsWith($method, 'Like')) {
-            $column = Str::snake(Str::before($method, 'Like'));
-            return $this->handleLikeFilter($column, $args[0]);
+        // Check if direct column match
+        if ($this->isFilterableColumn($snakeMethod)) {
+            return $this->builder->where($snakeMethod, $value);
         }
-
+        
         return $this->builder;
     }
     
     /**
-     * Generic _min suffix handler for range filtering.
-     * 
+     * Check if a column is filterable in the model.
+     *
      * @param string $column
-     * @param mixed $value
-     * @return Builder
+     * @return bool
      */
-    protected function handleMinFilter($column, $value)
+    protected function isFilterableColumn(string $column): bool
     {
-        return $this->builder->where($column, '>=', $value);
-    }
-    
-    /**
-     * Generic _max suffix handler for range filtering.
-     * 
-     * @param string $column
-     * @param mixed $value
-     * @return Builder
-     */
-    protected function handleMaxFilter($column, $value)
-    {
-        return $this->builder->where($column, '<=', $value);
-    }
-    
-    /**
-     * Generic _like suffix handler for partial matching.
-     * 
-     * @param string $column
-     * @param mixed $value
-     * @return Builder
-     */
-    protected function handleLikeFilter($column, $value)
-    {
-        return $this->builder->where($column, 'like', "%{$value}%");
+        if (!empty($this->modelClass) && method_exists($this->modelClass, 'getFilterableColumns')) {
+            return in_array($column, $this->modelClass::getFilterableColumns());
+        }
+        return false;
     }
     
     /**
@@ -153,7 +148,7 @@ class ModelFilter extends Filter
         $direction = $this->request->input('sort_direction', 'asc');
         $direction = in_array(strtolower($direction), ['asc', 'desc']) ? $direction : 'asc';
         
-        if (!empty($this->modelClass) && in_array($column, $this->modelClass::getFilterableColumns())) {
+        if ($this->isFilterableColumn($column)) {
             return $this->builder->orderBy($column, $direction);
         }
         

@@ -42,12 +42,47 @@ abstract class Filter
     public function apply(Builder $builder)
     {
         $this->builder = $builder;
+        
+        // Add a bit of debug info
+        \Log::debug('Applying filters', ['filters' => $this->getFilters()]);
 
         foreach ($this->getFilters() as $filter => $value) {
+            if (is_null($value) || $value === '') {
+                continue;
+            }
+            
             $method = Str::camel($filter);
             
-            // Handle both explicit methods and dynamic methods (__call)
-            if ((method_exists($this, $method) || method_exists($this, '__call')) && !is_null($value)) {
+            // First try explicit method
+            if (method_exists($this, $method)) {
+                call_user_func([$this, $method], $value);
+                continue;
+            }
+            
+            // Then check for _like suffix
+            if (Str::endsWith($filter, '_like')) {
+                $column = Str::before($filter, '_like');
+                $this->builder->where($column, 'like', "%{$value}%");
+                continue;
+            }
+            
+            // Check for _min suffix
+            if (Str::endsWith($filter, '_min')) {
+                $column = Str::before($filter, '_min');
+                $this->builder->where($column, '>=', $value);
+                continue;
+            }
+            
+            // Check for _max suffix
+            if (Str::endsWith($filter, '_max')) {
+                $column = Str::before($filter, '_max');
+                $this->builder->where($column, '<=', $value);
+                continue;
+            }
+            
+            // For direct column matches or other dynamic methods, 
+            // delegate to __call if it exists
+            if (method_exists($this, '__call')) {
                 $this->$method($value);
             }
         }
@@ -85,7 +120,35 @@ abstract class Filter
      */
     protected function getFilters(): array
     {
-        return $this->request->only($this->getAllowedFilters());
+        $allowedFilters = $this->getAllowedFilters();
+        $filters = [];
+        
+        // Process request inputs and match them to allowed filters
+        foreach ($this->request->all() as $key => $value) {
+            // Check for exact match
+            if (in_array($key, $allowedFilters)) {
+                $filters[$key] = $value;
+                continue;
+            }
+            
+            // Check for camelCase to snake_case conversion
+            $snakeKey = Str::snake($key);
+            if (in_array($snakeKey, $allowedFilters)) {
+                $filters[$snakeKey] = $value;
+                continue;
+            }
+            
+            // Check for snake_case to camelCase conversion
+            $camelKey = Str::camel($key);
+            if (in_array($camelKey, $allowedFilters)) {
+                $filters[$camelKey] = $value;
+            }
+        }
+        
+        // Filter out null values
+        return array_filter($filters, function ($value) {
+            return !is_null($value) && $value !== '';
+        });
     }
 
     /**
