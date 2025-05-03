@@ -19,6 +19,13 @@ class ModelFilter extends Filter
     protected $modelClass;
 
     /**
+     * Explicitly set filterable columns.
+     *
+     * @var array|null
+     */
+    protected $filterableColumns = null;
+
+    /**
      * Set the model class for this filter.
      *
      * @param string $modelClass
@@ -31,21 +38,40 @@ class ModelFilter extends Filter
     }
 
     /**
+     * Set filterable columns explicitly.
+     * This is useful when restoring from cache.
+     *
+     * @param array $columns
+     * @return $this
+     */
+    public function setFilterableColumns(array $columns)
+    {
+        $this->filterableColumns = $columns;
+        return $this;
+    }
+
+    /**
      * Get allowed filters based on model's filterable columns.
      *
      * @return array
      */
     protected function getAllowedFilters(): array
     {
-        if (empty($this->modelClass) || !class_exists($this->modelClass)) {
-            return [];
+        // First try explicitly set filterable columns
+        if (is_array($this->filterableColumns)) {
+            $baseFilters = $this->filterableColumns;
         }
-        
-        if (method_exists($this->modelClass, 'getFilterableColumns')) {
-            // Get model's filterable columns if the model uses the Filterable trait
-            $baseFilters = $this->modelClass::getFilterableColumns();
+        // Then try to get from model
+        else if (!empty($this->modelClass) && class_exists($this->modelClass)) {
+            if (method_exists($this->modelClass, 'getFilterableColumns')) {
+                // Get model's filterable columns if the model uses the Filterable trait
+                $baseFilters = $this->modelClass::getFilterableColumns();
+            } else {
+                // Fallback to empty array if model doesn't use the trait
+                $baseFilters = [];
+            }
         } else {
-            // Fallback to empty array if model doesn't use the trait
+            // Fallback to empty array
             $baseFilters = [];
         }
         
@@ -140,9 +166,16 @@ class ModelFilter extends Filter
      */
     protected function isFilterableColumn(string $column): bool
     {
+        // First check our explicit filterable columns array if it exists
+        if (is_array($this->filterableColumns)) {
+            return in_array($column, $this->filterableColumns);
+        }
+        
+        // Then try to get from model
         if (!empty($this->modelClass) && method_exists($this->modelClass, 'getFilterableColumns')) {
             return in_array($column, $this->modelClass::getFilterableColumns());
         }
+        
         return false;
     }
     
@@ -153,6 +186,11 @@ class ModelFilter extends Filter
      */
     protected function getFilterableColumnsDebug(): array
     {
+        // First check our explicit filterable columns array if it exists
+        if (is_array($this->filterableColumns)) {
+            return $this->filterableColumns;
+        }
+        
         if (!empty($this->modelClass)) {
             if (method_exists($this->modelClass, 'getFilterableColumns')) {
                 return $this->modelClass::getFilterableColumns();

@@ -157,31 +157,63 @@ class DynamicFilterResolver
     protected function generateFilterInMemory(string $modelClass, array $parameters = []): Filter
     {
         $cacheKey = 'filters_toolkit:dynamic_filter:' . md5($modelClass);
+        $request = $parameters['request'] ?? app(\Illuminate\Http\Request::class);
         
-        // Check if we've already generated this filter
-        if (Cache::has($cacheKey)) {
-            $filterClass = Cache::get($cacheKey);
-            
-            // Verify the class still exists
-            if (class_exists($filterClass)) {
-                return $this->resolveFilterInstance($filterClass, $parameters);
+        // Process the request parameters for proper filtering
+        $filterableColumns = $this->getFilterableColumnsFromModel($modelClass);
+        
+        // Check if cache config is enabled
+        $cacheDuration = config('laravel-filters.cache_duration', 0);
+        
+        if ($cacheDuration > 0) {
+            // Check if we've already generated this filter
+            if (Cache::has($cacheKey)) {
+                $cachedData = Cache::get($cacheKey);
+                
+                // Make sure we have full cached data (both class and columns)
+                if (is_array($cachedData) && 
+                    isset($cachedData['class']) && 
+                    isset($cachedData['columns']) &&
+                    class_exists($cachedData['class'])) {
+                    
+                    \Log::debug('Retrieved filter from cache', [
+                        'model' => $modelClass,
+                        'filter' => $cachedData['class']
+                    ]);
+                    
+                    $filterInstance = $this->resolveFilterInstance($cachedData['class'], $parameters);
+                    
+                    // Configure the filter with the cached columns if needed
+                    if (method_exists($filterInstance, 'setFilterableColumns')) {
+                        $filterInstance->setFilterableColumns($cachedData['columns']);
+                    }
+                    
+                    return $filterInstance;
+                }
             }
         }
 
         \Log::debug('Generating dynamic filter for model', ['model' => $modelClass]);
         
-        // Create filter class content
-        $filterableColumns = $this->getFilterableColumnsFromModel($modelClass);
-        
-        // Process the request parameters for proper filtering
-        $request = $parameters['request'] ?? app(\Illuminate\Http\Request::class);
-        
         // Create an instance of ModelFilter and configure it for the target model
         $baseFilter = new ModelFilter($request);
         $baseFilter->forModel($modelClass);
         
-        // Store the filter class in cache for next time
-        Cache::put($cacheKey, get_class($baseFilter), now()->addHour());
+        // Store filter configuration in cache if caching is enabled
+        if ($cacheDuration > 0) {
+            $cacheData = [
+                'class' => get_class($baseFilter),
+                'columns' => $filterableColumns
+            ];
+            
+            Cache::put($cacheKey, $cacheData, now()->addMinutes($cacheDuration));
+            
+            \Log::debug('Stored filter in cache', [
+                'model' => $modelClass, 
+                'cache_key' => $cacheKey,
+                'duration' => $cacheDuration
+            ]);
+        }
         
         return $baseFilter;
     }

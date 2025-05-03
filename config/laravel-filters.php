@@ -20,7 +20,7 @@ return [
     'allow_all_params_by_default' => false,
     
     // Default cache duration in minutes (set to 0 to disable caching)
-    'cache_duration' => 0,
+    'cache_duration' => env('LARAVEL_FILTERS_CACHE_DURATION', 0),
     
     // Default sort column when not specified in request
     'default_sort_column' => 'created_at',
