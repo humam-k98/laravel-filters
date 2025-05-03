@@ -242,9 +242,38 @@ The package supports various filter parameter formats:
 | `sort_by` | `sort_by=created_at` | Column to sort by |
 | `sort_direction` | `sort_direction=desc` | Sort direction (asc/desc) |
 
-## Filtering with Static Values
+### Camel Case Method Names
 
-Sometimes you may want to filter your models by predefined static values rather than dynamic request parameters. Here are several approaches to achieve this:
+When creating custom filter classes, method names should be in camelCase format. For example:
+
+- For parameter `age_min`, create a method named `ageMin`
+- For parameter `name_like`, create a method named `nameLike`
+
+The filter system will automatically convert snake_case parameters from the request to camelCase method names when calling your filter methods.
+
+```php
+class UserFilter extends Filter
+{
+    protected function getAllowedFilters(): array
+    {
+        return ['name', 'email', 'age_min', 'age_max'];
+    }
+    
+    // Method to handle 'age_min' parameter
+    protected function ageMin($value)
+    {
+        return $this->builder->where('age', '>=', $value);
+    }
+    
+    // Method to handle 'age_max' parameter
+    protected function ageMax($value)
+    {
+        return $this->builder->where('age', '<=', $value);
+    }
+}
+```
+
+## Filtering with Static Values
 
 ### Using Static Conditions with Filters
 

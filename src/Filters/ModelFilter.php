@@ -3,6 +3,7 @@
 namespace HumamK98\LaravelFilters\Filters;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 
 /**
  * Example concrete filter class
@@ -78,11 +79,30 @@ class ModelFilter extends Filter
      */
     public function __call($method, $args)
     {
-        // Check if method is related to a filterable column
-        if (!empty($this->modelClass) && in_array($method, $this->modelClass::getFilterableColumns())) {
+        // Check if direct column match
+        if (!empty($this->modelClass) && method_exists($this->modelClass, 'getFilterableColumns') && 
+            in_array($method, $this->modelClass::getFilterableColumns())) {
             return $this->builder->where($method, $args[0]);
         }
         
+        // Check if it's a min filter
+        if (Str::endsWith($method, 'Min')) {
+            $column = Str::snake(Str::before($method, 'Min'));
+            return $this->handleMinFilter($column, $args[0]);
+        }
+        
+        // Check if it's a max filter
+        if (Str::endsWith($method, 'Max')) {
+            $column = Str::snake(Str::before($method, 'Max'));
+            return $this->handleMaxFilter($column, $args[0]);
+        }
+        
+        // Check if it's a like filter
+        if (Str::endsWith($method, 'Like')) {
+            $column = Str::snake(Str::before($method, 'Like'));
+            return $this->handleLikeFilter($column, $args[0]);
+        }
+
         return $this->builder;
     }
     

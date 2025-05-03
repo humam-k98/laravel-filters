@@ -46,12 +46,36 @@ abstract class Filter
         foreach ($this->getFilters() as $filter => $value) {
             $method = Str::camel($filter);
             
-            if (method_exists($this, $method) && !is_null($value)) {
+            // Handle both explicit methods and dynamic methods (__call)
+            if ((method_exists($this, $method) || method_exists($this, '__call')) && !is_null($value)) {
                 $this->$method($value);
             }
         }
 
+        // Handle sorting if present
+        if ($this->request->has('sort_by')) {
+            $this->applySorting();
+        }
+
         return $this->builder;
+    }
+
+    /**
+     * Apply sorting to the builder.
+     *
+     * @return void
+     */
+    protected function applySorting()
+    {
+        $column = $this->request->input('sort_by');
+        $direction = $this->request->input('sort_direction', 'asc');
+        $direction = in_array(strtolower($direction), ['asc', 'desc']) ? $direction : 'asc';
+        
+        if (method_exists($this, 'sortBy')) {
+            $this->sortBy($column);
+        } else {
+            $this->builder->orderBy($column, $direction);
+        }
     }
 
     /**
